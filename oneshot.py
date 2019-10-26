@@ -22,8 +22,8 @@ class Options():
 		self.verbose = False
 		self.showpixiecmd = False
 
-def cprint(s):
-	sys.stdout.write(s + '\n')
+def cprint(s, nl=True):
+	sys.stdout.write(s + ('\n' if nl else ''))
 	sys.stdout.flush()
 
 def shellcmd(cmd):
@@ -73,7 +73,7 @@ def process_wpa_supplicant(pipe, options, data):
 		return False
 	line = line.rstrip('\n')
 
-	if options.verbose: sys.stderr.write(line + '\n')
+	if options.verbose: cprint(line)
 
 	if line.startswith('WPS: '):
 		if 'Enrollee Nonce' in line and 'hexdump' in line:
@@ -186,7 +186,7 @@ if __name__ == '__main__':
 	wpas = run_wpa_supplicant(options)
 	while True:
 		s = recvuntil(wpas, '\n')
-		if options.verbose: sys.stderr.write(s)
+		if options.verbose: cprint(s, False)
 		if 'update_config=1' in s: break
 
 	wpac = run_wpa_cli(options)
