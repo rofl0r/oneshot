@@ -22,6 +22,10 @@ class Options():
 		self.verbose = False
 		self.showpixiecmd = False
 
+def cprint(s):
+	sys.stdout.write(s + '\n')
+	sys.stdout.flush()
+
 def shellcmd(cmd):
 	proc = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE)
 	result = proc.read()
@@ -54,7 +58,7 @@ def got_all_pixie_data(data):
 	return data.pke and data.pkr and data.e_nonce and data.authkey and data.e_hash1 and data.e_hash2
 
 def statechange(data, old, new):
-	print '%s -> %s'%(old, new)
+	cprint('%s -> %s'%(old, new))
 	data.state = new
 	return True
 
@@ -100,24 +104,24 @@ def process_wpa_supplicant(pipe, options, data):
 	elif ': State: ' in line:
 		statechange(data, *line.split(': State: ')[1].split(' -> '))
 	elif 'WPS-FAIL' in line:
-		print "WPS-FAIL :("
+		cprint("WPS-FAIL :(")
 		return False
 
 	elif 'NL80211_CMD_DEL_STATION' in line:
 		#if data.state == 'ASSOCIATED':
 		#	print "URGH"
-		print "[ERROR]: unexpected interference - kill NetworkManager/wpa_supplicant!"
+		cprint("[ERROR]: unexpected interference - kill NetworkManager/wpa_supplicant!")
 		#return False
 	elif 'Trying to authenticate with' in line:
-		print line
+		cprint(line)
 	elif 'Authentication response' in line:
-		print line
+		cprint(line)
 	elif 'Trying to associate with' in line:
-		print line
+		cprint(line)
 	elif 'Associated with' in line:
-		print line
+		cprint(line)
 	elif 'EAPOL: txStart' in line:
-		print line
+		cprint(line)
 
 	return True
 
@@ -198,7 +202,7 @@ if __name__ == '__main__':
 		try:
 			res = process_wpa_supplicant(wpas, options, data)
 		except KeyboardInterrupt:
-			print "aborting..."
+			cprint("aborting...")
 			res = False
 
 		if not res: break
@@ -208,18 +212,18 @@ if __name__ == '__main__':
 
 		if options.pixiemode and pixiecmd:
 			cleanup(wpas, wpac, options)
-			print "running %s" % pixiecmd
+			cprint("running %s" % pixiecmd)
 			os.execlp('/bin/sh', '/bin/sh', '-c', pixiecmd)
 			# shouldnt get here
 			sys.exit(1)
 
 		if data.wpa_psk:
-			if options.showpixiecmd and pixiecmd: print pixiecmd
+			if options.showpixiecmd and pixiecmd: cprint(pixiecmd)
 			cleanup(wpas, wpac, options)
-			print "!!! GOT WPA KEY !!!: %s" % data.wpa_psk
+			cprint("!!! GOT WPA KEY !!!: %s" % data.wpa_psk)
 			sys.exit(0)
 
-	print "hmm, seems something went wrong..."
-	if options.showpixiecmd and pixiecmd: print pixiecmd
+	cprint("hmm, seems something went wrong...")
+	if options.showpixiecmd and pixiecmd: cprint(pixiecmd)
 	cleanup(wpas, wpac, options)
 	sys.exit(1)
